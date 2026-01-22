@@ -1,66 +1,29 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
-# Базовая схема для Task.
-# Все поля, которые есть в нашей "базе данных" tasks_db
+
 class TaskBase(BaseModel):
- title: str = Field(
- ..., # троеточие означает "обязательное поле"
- min_length=3,
- max_length=100,
- description="Название задачи")
- description: Optional[str] = Field(
- None, # None = необязательное поле
- max_length=500,
- description="Описание задачи")
- is_important: bool = Field(
- ...,
- description="Важность задачи")
- is_urgent: bool = Field(
- ...,
- description="Срочность задачи")
-# Схема для создания новой задачи
-# Наследует все поля от TaskBase
+    title: str
+    description: Optional[str] = None
+    is_important: bool
+    is_urgent: bool
+
 class TaskCreate(TaskBase):
- pass
-# Схема для обновления задачи (используется в PUT)
-# Все поля опциональные, т.к. мы можем захотеть обновить только title или status
+    pass
+
 class TaskUpdate(BaseModel):
- title: Optional[str] = Field(
- None,
- min_length=3,
- max_length=100,
- description="Новое название задачи")
- description: Optional[str] = Field(
- None,
- max_length=500,
- description="Новое описание")
- is_important: Optional[bool] = Field(
- None,
- description="Новая важность")
- is_urgent: Optional[bool] = Field(
- None,
- description="Новая срочность")
- completed: Optional[bool] = Field(
-  None,
- description="Статус выполнения")
-# Модель для ответа (TaskResponse)
-# При ответе сервер возвращает полную информацию о задаче,
-# включая сгенерированные поля: id, quadrant, created_at, etc.
+    title: Optional[str] = None
+    description: Optional[str] = None
+    is_important: Optional[bool] = None
+    is_urgent: Optional[bool] = None
+    completed: Optional[bool] = None
+
 class TaskResponse(TaskBase):
- id: int = Field(
- ...,
- description="Уникальный идентификатор задачи",
- examples=[1])
- quadrant: str = Field(
- ...,
- description="Квадрант матрицы Эйзенхауэра (Q1, Q2, Q3, Q4)",
- examples=["Q1"])
- completed: bool = Field(
- default=False,
- description="Статус выполнения задачи")
- created_at: datetime = Field(
- ...,
- description="Дата и время создания задачи")
- class Config: # Config класс для работы с ORM (понадобится посдеподключения СУБД)
-  from_attributes = True
+    id: int
+    quadrant: str
+    completed: bool
+    created_at: datetime
+    completed_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True

@@ -1,35 +1,34 @@
-from fastapi import APIRouter
-from typing import Dict
-from database import tasks_db  # Импортируем общее хранилище
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from models import Task
+from database import get_async_session
 
 router = APIRouter(
     prefix="/stats",
-    tags=["stats"]
+    tags=["statistics"]
 )
 
 @router.get("/")
-async def get_tasks_stats() -> Dict:
- # Подсчет задач по квадрантам
+async def get_tasks_stats(
+    db: AsyncSession = Depends(get_async_session)
+):
+    result = await db.execute(select(Task))
+    tasks = result.scalars().all()
+
     by_quadrant = {"Q1": 0, "Q2": 0, "Q3": 0, "Q4": 0}
-    completed_count = 0
-    pending_count = 0
-    
-    for task in tasks_db:
-        quadrant = task["quadrant"]
-        if quadrant in by_quadrant:
-            by_quadrant[quadrant] += 1
-        
-        # Подсчет по статусу
-        if task["completed"]:
-            completed_count += 1
+    by_status = {"completed": 0, "pending": 0}
+
+    for task in tasks:
+        by_quadrant[task.quadrant] += 1
+        if task.completed:
+            by_status["completed"] += 1
         else:
-            pending_count += 1
-    
+            by_status["pending"] += 1
+
     return {
-        "total_tasks": len(tasks_db),
+        "total_tasks": len(tasks),
         "by_quadrant": by_quadrant,
-        "by_status": {
-            "completed": completed_count,
-            "pending": pending_count
-        }
+        "by_status": by_status
     }
