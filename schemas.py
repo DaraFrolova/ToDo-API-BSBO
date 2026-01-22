@@ -50,6 +50,7 @@ class TaskResponse(BaseModel):
     deadline_at: Optional[datetime]  
     days_until_deadline: Optional[int] = None 
     status_message: Optional[str] = None
+    user_id: Optional[int] = None
 
     class Config:
         from_attributes = True
