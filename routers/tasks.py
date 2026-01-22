@@ -7,6 +7,7 @@ from datetime import datetime
 from database import get_async_session
 from models import Task
 from schemas import TaskCreate, TaskUpdate, TaskResponse
+from utils import calculate_urgency, determine_quadrant, calculate_days_until_deadline
 
 router = APIRouter(
     prefix="/tasks",
@@ -66,20 +67,74 @@ async def get_tasks_by_status(
     )
     return result.scalars().all()
 
+@router.get("/today", response_model=list[TaskResponse])
+async def get_tasks_due_today(
+    db: AsyncSession = Depends(get_async_session)
+):
+
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import and_
+    
+    # Получаем сегодняшнюю дату в UTC
+    now = datetime.now(timezone.utc)
+    today_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    today_end = today_start + timedelta(days=1)
+    
+    # Ищем незавершённые задачи с дедлайном сегодня
+    result = await db.execute(
+        select(Task).where(
+            and_(
+                Task.completed == False,
+                Task.deadline_at.isnot(None),
+                Task.deadline_at >= today_start,
+                Task.deadline_at < today_end
+            )
+        ).order_by(Task.deadline_at)
+    )
+    
+    tasks = result.scalars().all()
+    
+    # Добавляем вычисляемые поля к каждой задаче
+    tasks_with_fields = []
+    for task in tasks:
+        days = calculate_days_until_deadline(task.deadline_at)
+        
+        task_dict = task.__dict__.copy()
+        task_dict['days_until_deadline'] = days
+        
+        if days is not None and days < 0:
+            task_dict['status_message'] = "Задача просрочена"
+        else:
+            task_dict['status_message'] = "Все идет по плану!"
+        
+        tasks_with_fields.append(TaskResponse(**task_dict))
+    
+    return tasks_with_fields
+
 @router.get("/{task_id}", response_model=TaskResponse)
 async def get_task_by_id(
     task_id: int,
     db: AsyncSession = Depends(get_async_session)
 ):
+
     result = await db.execute(
         select(Task).where(Task.id == task_id)
     )
     task = result.scalar_one_or_none()
 
     if not task:
-        raise HTTPException(404, "Задача не найдена")
+        raise HTTPException(status_code=404, detail="Задача не найдена")
 
-    return task
+    days_deadline = calculate_days_until_deadline(task.deadline_at)
+    task_dict = task.__dict__.copy()
+    
+    task_dict['days_until_deadline'] = days_deadline
+
+    if task.deadline_at is not None and days_deadline is not None and days_deadline < 0:
+        task_dict['status_message'] = "Задача просрочена"  
+    else:
+        task_dict['status_message'] = "Все идет по плану!"
+    return TaskResponse(**task_dict)
 
 
 @router.put("/{task_id}", response_model=TaskResponse)
@@ -90,27 +145,25 @@ async def update_task(
 ):
     result = await db.execute(select(Task).where(Task.id == task_id))
     task = result.scalar_one_or_none()
-
     if not task:
-        raise HTTPException(404, "Задача не найдена")
+        raise HTTPException(status_code=404, detail="Задача не найдена")
 
     update_data = task_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(task, field, value)
 
-    if "is_important" in update_data or "is_urgent" in update_data:
-        if task.is_important and task.is_urgent:
-            task.quadrant = "Q1"
-        elif task.is_important:
-            task.quadrant = "Q2"
-        elif task.is_urgent:
-            task.quadrant = "Q3"
-        else:
-            task.quadrant = "Q4"
+    # Пересчитываем срочность и квадрант, если изменилась важность или дедлайн
+    if "is_important" in update_data or "deadline_at" in update_data:
+        task.is_urgent = calculate_urgency(task.deadline_at)
+        task.quadrant = determine_quadrant(task.is_important, task.is_urgent)
 
     await db.commit()
     await db.refresh(task)
-    return task
+
+    response = TaskResponse.model_validate(task)
+    response.days_until_deadline = calculate_days_until_deadline(task.deadline_at)
+
+    return response
 
 @router.delete("/{task_id}")
 async def delete_task(
@@ -132,33 +185,34 @@ async def delete_task(
         "title": task.title
     }
 
-@router.post("", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=TaskResponse)
 async def create_task(
     task: TaskCreate,
     db: AsyncSession = Depends(get_async_session)
 ):
-    if task.is_important and task.is_urgent:
-        quadrant = "Q1"
-    elif task.is_important:
-        quadrant = "Q2"
-    elif task.is_urgent:
-        quadrant = "Q3"
-    else:
-        quadrant = "Q4"
+    # Определяем срочность на основе дедлайна
+    is_urgent = calculate_urgency(task.deadline_at)
+    quadrant = determine_quadrant(task.is_important, is_urgent)
 
     new_task = Task(
         title=task.title,
         description=task.description,
         is_important=task.is_important,
-        is_urgent=task.is_urgent,
+        is_urgent=is_urgent,
         quadrant=quadrant,
-        completed=False
+        completed=False,
+        deadline_at=task.deadline_at
     )
 
     db.add(new_task)
     await db.commit()
     await db.refresh(new_task)
-    return new_task
+
+    # Добавляем вычисляемое поле для ответа
+    response = TaskResponse.model_validate(new_task)
+    response.days_until_deadline = calculate_days_until_deadline(new_task.deadline_at)
+
+    return response
 
 @router.patch("/{task_id}/complete", response_model=TaskResponse)
 async def complete_task(
@@ -177,3 +231,4 @@ async def complete_task(
     await db.commit()
     await db.refresh(task)
     return task
+

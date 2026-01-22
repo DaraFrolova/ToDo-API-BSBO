@@ -29,6 +29,8 @@ class Task(Base):
 
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
+    deadline_at = Column(DateTime(timezone=True), nullable=True)
+
     def __repr__(self) -> str:
         return f"<Task(id={self.id}, title='{self.title}', quadrant='{self.quadrant}')>"
 
@@ -42,5 +44,6 @@ class Task(Base):
             "quadrant": self.quadrant,
             "completed": self.completed,
             "created_at": self.created_at,
-            "completed_at": self.completed_at
+            "completed_at": self.completed_at,
+            "deadline_at": self.deadline_at
         }

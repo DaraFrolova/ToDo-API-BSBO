@@ -1,26 +1,32 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
-
-from database import init_db, get_async_session
+from database import init_db
 from routers import tasks, stats
+from scheduler import start_scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print(" Запуск приложения...")
-    print(" Инициализация базы данных...")
-    
+    # Код ДО yield выполняется при ЗАПУСКЕ
+    print("🚀 Запуск приложения...")
+    print("🔄 Инициализация базы данных...")
     await init_db()
-    print(" Приложение готово к работе!")
-    yield # Здесь приложение работает
-    
-    print(" Остановка приложения...")
+
+    # Запускаем планировщик задач
+    print("⏰ Запуск планировщика задач...")
+    scheduler = start_scheduler()
+
+    print("✅ Приложение готово к работе!")
+    yield  # Здесь приложение работает
+
+    # Код ПОСЛЕ yield выполняется при ОСТАНОВКЕ
+    print("🛑 Остановка приложения...")
+    scheduler.shutdown(wait=False)
+    print("👋 Планировщик остановлен.")
 
 app = FastAPI(
     title="ToDo лист API",
-    description="API для управления задачами по матрице Эйзенхауэра",
-    version="2.0.0",
+    description="API для управления задачами с использованием матрицы Эйзенхауэра",
+    version="2.1.0",
     lifespan=lifespan
 )
 
@@ -28,24 +34,12 @@ app.include_router(tasks.router, prefix="/api/v2")
 app.include_router(stats.router, prefix="/api/v2")
 
 @app.get("/")
-async def root():
+async def read_root():
     return {
-        "message": "Task Manager API",
+        "message": "Task Manager API - Управление задачами по матрице Эйзенхауэра",
+        "version": "2.1.0",
+        "database": "PostgreSQL",
         "docs": "/docs",
-        "redoc": "/redoc"
-    }
-
-@app.get("/health")
-async def health_check(
-    db: AsyncSession = Depends(get_async_session)
-):
-    try:
-        await db.execute(text("SELECT 1"))
-        db_status = "connected"
-    except Exception:
-        db_status = "disconnected"
-
-    return {
-        "status": "healthy",
-        "database": db_status
+        "redoc": "/redoc",
+        "scheduler": "APScheduler (ежедневно в 09:00)"
     }
